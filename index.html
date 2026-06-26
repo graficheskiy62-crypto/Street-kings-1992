@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>УЛИЦЫ 90-х</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: 'Arial', sans-serif;
+    overflow: hidden;
+    cursor: crosshair;
+  }
+  #game { border: 3px solid #333; background: #2a2a2a; display: block; }
+  #hud {
+    position: absolute; top: 20px; left: 20px;
+    color: #fff; font-size: 16px; font-weight: bold;
+    text-shadow: 1px 1px 2px #000; line-height: 1.8; display: none;
+  }
+  #mission {
+    position: absolute; top: 20px; right: 20px; width: 260px;
+    background: rgba(0,0,0,0.85); border: 2px solid #ff0;
+    padding: 10px; color: #fff; font-size: 13px; display: none;
+  }
+  #mission h3 { color: #ff0; margin-bottom: 6px; }
+  #msg {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 32px; color: #ff0;
+    text-shadow: 2px 2px 4px #000;
+    opacity: 0; transition: opacity 0.3s;
+    font-weight: bold; text-align: center; pointer-events: none;
+  }
+  #msg.show { opacity: 1; }
+  #ctrl {
+    position: absolute; bottom: 15px; left: 50%;
+    transform: translateX(-50%);
+    color: #ccc; font-size: 11px;
+    background: rgba(0,0,0,0.7);
+    padding: 6px 12px; border-radius: 4px; display: none;
+  }
+  .hp { color: #0f0; }
+  .money { color: #0f0; }
+  .wanted { color: #f00; }
+  
+  #driftUI {
+    position: absolute;
+    top: 180px;
+    left: 20px;
+    color: #ff6600;
+    font-size: 24px;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px #000;
+    display: none;
+    font-family: 'Impact', sans-serif;
+  }
+  #driftUI.active { display: block; }
+  #driftScore {
+    font-size: 36px;
+    color: #ffcc00;
+  }
+  #driftCombo {
+    font-size: 18px;
+    color: #ff3300;
+  }
+
+  #menu {
+    position: absolute; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: #fff;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    z-index: 1000;
+  }
+  #logo {
+    font-size: 72px; font-weight: 900;
+    color: #000; letter-spacing: 4px;
+    margin-bottom: 10px;
+    font-family: 'Impact', 'Arial Black', sans-serif;
+    text-transform: uppercase;
+  }
+  #logo span { color: #c00; }
+  #subtitle {
+    font-size: 24px; color: #333;
+    margin-bottom: 60px; letter-spacing: 8px;
+  }
+  #startBtn {
+    padding: 15px 50px; font-size: 22px;
+    background: #000; color: #fff;
+    border: none; cursor: pointer;
+    font-weight: bold; letter-spacing: 2px;
+    transition: all 0.2s;
+  }
+  #startBtn:hover { background: #c00; transform: scale(1.05); }
+  #menuInfo {
+    position: absolute; bottom: 30px;
+    color: #666; font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <div id="logo">УЛИЦЫ <span>90-х</span></div>
+  <div id="subtitle">КРИМИНАЛЬНЫЙ ГОРОД</div>
+  <button id="startBtn">НАЧАТЬ ИГРУ</button>
+  <div id="menuInfo">WASD — движение | МЫШЬ — прицел | ЛКМ — стрелять | F — тачка | SPACE — ручник (дрифт!)</div>
+</div>
+
+<canvas id="game" width="900" height="650"></canvas>
+
+<div id="hud">
+  <div class="hp">❤ HP: <span id="hp">100</span></div>
+  <div class="money">💰 $: <span id="money">0</span></div>
+  <div class="wanted">⭐ РОЗЫСК: <span id="wanted">-</span></div>
+  <div style="color:#ff0">🔫 ПАТРОНЫ: <span id="ammo">30</span></div>
+  <div style="color:#ff6600">🏎️ СКОРОСТЬ: <span id="speed">0</span> км/ч</div>
+</div>
+
+<div id="driftUI">
+  <div>🔥 ДРИФТ!</div>
+  <div id="driftScore">0</div>
+  <div id="driftCombo">x1</div>
+</div>
+
+<div id="mission">
+  <h3>📋 ЗАДАНИЕ</h3>
+  <div id="mt">Подойди к жёлтому маркеру</div>
+</div>
+
+<div id="ctrl">WASD - движение | ЛКМ - стрелять | F - тачка | SPACE - ручник/дрифт | SHIFT - бег | R - перезарядка</div>
+
+<div id="msg"></div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+let gameStarted = false;
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('menu').style.display = 'none';
+  document.getElementById('hud').style.display = 'block';
+  document.getElementById('mission').style.display = 'block';
+  document.getElementById('ctrl').style.display = 'block';
+  gameStarted = true;
+});
+
+const WORLD = 2400;
+const ROAD_W = 45;
+const BLOCK = 320;
+
+const player = {
+  x: 500, y: 500,
+  angle: 0,
+  hp: 100, money: 0, ammo: 30, wanted: 0,
+  inCar: false, car: null,
+  radius: 9
+};
+
+const cam = { x: 0, y: 0 };
+const mouse = { x: 450, y: 325, worldX: 0, worldY: 0 };
+
+const buildings = [];
+const roads = [];
+const sidewalks = [];
+const cars = [];
+const peds = [];
+const cops = [];
+const bullets = [];
+const copBullets = [];
+const particles = [];
+const corpses = [];
+const trees = [];
+const lamps = [];
+const explosions = [];
+const shells = [];
+const skidmarks = []; // СЛЕДЫ ШИН
+
+const missions = [
+  { x: 600, y: 500, text: 'Позвони боссу (жёлтый маркер)' },
+  { x: 300, y: 800, text: 'Угони красную тачку и вези на базу' },
+  { x: 1400, y: 400, text: 'Забери посылку' },
+  { x: 900, y: 1500, text: 'Доставь посылку клиенту' },
+  { x: 1800, y: 900, text: 'Устрани цель (красный маркер)' }
+];
+let curMission = 0;
+let hasPackage = false;
+
+// ДРИФТ статистика
+let driftScore = 0;
+let driftCombo = 1;
+let driftTime = 0;
+let isDrifting = false;
+let totalDriftMoney = 0;
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  if (!gameStarted) return;
+  keys[e.code] = true;
+  if (e.code === 'KeyF') toggleCar();
+  if (e.code === 'KeyR') reload();
+  e.preventDefault();
+});
+window.addEventListener('keyup', e => {
+  keys[e.code] = false;
+  // Если отпустили ручник — начислить деньги за дрифт
+  if (e.code === 'Space' && isDrifting && player.inCar) {
+    const bonus = Math.floor(driftScore / 10);
+    if (bonus > 0) {
+      player.money += bonus;
+      totalDriftMoney += bonus;
+      showMsg(`🔥 ДРИФТ БОНУС: +$${bonus}`);
+    }
+    driftScore = 0;
+    driftCombo = 1;
+    driftTime = 0;
+    isDrifting = false;
+    document.getElementById('driftUI').classList.remove('active');
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
+
+canvas.addEventListener('mousedown', e => {
+  if (!gameStarted) return;
+  if (e.button === 0) shoot();
+});
+
+function pointInBuilding(x, y, r = 0) {
+  for (const b of buildings) {
+    if (x + r > b.x && x - r < b.x + b.w &&
+        y + r > b.y && y - r < b.y + b.h) {
+      return b;
+    }
+  }
+  return null;
+}
+
+function canMove(x, y, r) {
+  return !pointInBuilding(x, y, r) &&
+         x > r && x < WORLD - r &&
+         y > r && y < WORLD - r;
+}
+
+function isOnRoad(x, y) {
+  for (const r of roads) {
+    if (x > r.x + 6 && x < r.x + r.w - 6 &&
+        y > r.y + 6 && y < r.y + r.h - 6) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function randomRoadPoint() {
+  for (let i = 0; i < 50; i++) {
+    const x = Math.random() * WORLD;
+    const y = Math.random() * WORLD;
+    if (isOnRoad(x, y)) return { x, y };
+  }
+  return { x: 500, y: 500 };
+}
+
+function genCity() {
+  for (let x = 0; x < WORLD; x += BLOCK) {
+    roads.push({ x: x, y: 0, w: ROAD_W, h: WORLD, vertical: true });
+  }
+  for (let y = 0; y < WORLD; y += BLOCK) {
+    roads.push({ x: 0, y: y, w: WORLD, h: ROAD_W, vertical: false });
+  }
+
+  const sw = 8;
+  for (const r of roads) {
+    if (r.vertical) {
+      sidewalks.push({ x: r.x - sw, y: r.y, w: sw, h: r.h });
+      sidewalks.push({ x: r.x + r.w, y: r.y, w: sw, h: r.h });
+    } else {
+      sidewalks.push({ x: r.x, y: r.y - sw, w: r.w, h: sw });
+      sidewalks.push({ x: r.x, y: r.y + r.h, w: r.w, h: sw });
+    }
+  }
+
+  for (let bx = ROAD_W + 20; bx < WORLD - 100; bx += BLOCK) {
+    for (let by = ROAD_W + 20; by < WORLD - 100; by += BLOCK) {
+      const numBuildings = Math.floor(Math.random() * 3) + 1;
+      const blockInner = BLOCK - ROAD_W - 40;
+      if (numBuildings === 1) {
+        addBuilding(bx + 5, by + 5, blockInner - 10, blockInner - 10);
+      } else {
+        if (Math.random() > 0.5) {
+          const h1 = blockInner * (0.3 + Math.random() * 0.4);
+          addBuilding(bx + 5, by + 5, blockInner - 10, h1 - 5);
+          addBuilding(bx + 5, by + h1 + 10, blockInner - 10, blockInner - h1 - 15);
+        } else {
+          const w1 = blockInner * (0.3 + Math.random() * 0.4);
+          addBuilding(bx + 5, by + 5, w1 - 5, blockInner - 10);
+          addBuilding(bx + w1 + 10, by + 5, blockInner - w1 - 15, blockInner - 10);
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < 80; i++) {
+    const x = Math.random() * WORLD;
+    const y = Math.random() * WORLD;
+    if (!pointInBuilding(x, y, 5) && !isOnRoad(x, y)) {
+      trees.push({ x, y, size: 8 + Math.random() * 6 });
+    }
+  }
+
+  for (let x = 50; x < WORLD; x += 150) {
+    lamps.push({ x: x, y: 25 });
+    lamps.push({ x: x, y: WORLD - 25 });
+  }
+  for (let y = 50; y < WORLD; y += 150) {
+    lamps.push({ x: 25, y: y });
+    lamps.push({ x: WORLD - 25, y: y });
+  }
+
+  const carColors = ['#c00', '#00c', '#0c0', '#cc0', '#c0c', '#0cc', '#fff', '#888', '#f80', '#808', '#a44', '#44a', '#4a4', '#aa4'];
+  for (let i = 0; i < 30; i++) {
+    const p = randomRoadPoint();
+    let angle = 0;
+    for (const r of roads) {
+      if (p.x >= r.x && p.x <= r.x + r.w && r.vertical) {
+        angle = Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2;
+        break;
+      }
+      if (p.y >= r.y && p.y <= r.y + r.h && !r.vertical) {
+        angle = Math.random() > 0.5 ? 0 : Math.PI;
+        break;
+      }
+    }
+    cars.push({
+      x: p.x, y: p.y,
+      angle: angle,
+      velocityAngle: angle, // направление движения (для дрифта)
+      speed: 0,
+      lateralSpeed: 0, // боковая скорость (для дрифта)
+      color: carColors[Math.floor(Math.random() * carColors.length)],
+      w: 42, h: 22,
+      hp: 100, maxHp: 100,
+      damaged: false,
+      burning: false,
+      burnTimer: 0,
+      isTarget: i === 0
+    });
+  }
+
+  for (let i = 0; i < 40; i++) {
+    const p = randomRoadPoint();
+    peds.push({
+      x: p.x, y: p.y,
+      angle: Math.random() * Math.PI * 2,
+      speed: 0.5 + Math.random() * 0.3,
+      hp: 50,
+      shirtColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
+      skinColor: `hsl(${Math.random() * 40 + 15}, 60%, ${50 + Math.random() * 20}%)`,
+      radius: 8,
+      alive: true,
+      panicTimer: 0
+    });
+  }
+
+  const start = randomRoadPoint();
+  player.x = start.x;
+  player.y = start.y;
+}
+
+function addBuilding(x, y, w, h) {
+  const hue = Math.random() * 60 + 10;
+  buildings.push({
+    x, y, w, h,
+    color: `hsl(${hue}, 25%, ${28 + Math.random() * 12}%)`,
+    roofColor: `hsl(${hue}, 15%, ${18 + Math.random() * 8}%)`,
+    windowColor: Math.random() > 0.3 ? 'rgba(255,240,150,0.75)' : 'rgba(100,120,150,0.5)',
+    hasAntenna: Math.random() > 0.6,
+    hasAC: Math.random() > 0.5,
+    hasSign: Math.random() > 0.7,
+    signColor: `hsl(${Math.random() * 360}, 70%, 50%)`
+  });
+}
+
+function toggleCar() {
+  if (player.inCar) {
+    const car = player.car;
+    const exitX = car.x - Math.cos(car.angle + Math.PI/2) * 30;
+    const exitY = car.y - Math.sin(car.angle + Math.PI/2) * 30;
+    if (canMove(exitX, exitY, player.radius)) {
+      player.inCar = false;
+      player.x = exitX;
+      player.y = exitY;
+      car.speed = 0;
+      car.lateralSpeed = 0;
+      player.car = null;
+    }
+  } else {
+    let nearest = null, minDist = 50;
+    cars.forEach(car => {
+      if (car.burning) return;
+      const dist = Math.hypot(player.x - car.x, player.y - car.y);
+      if (dist < minDist) { minDist = dist; nearest = car; }
+    });
+    if (nearest) {
+      player.inCar = true;
+      player.car = nearest;
+      if (nearest.isTarget && curMission === 1) {
+        showMsg('🚗 ТАЧКА УГНАНА! Вези на базу!');
+        curMission = 2;
+        missions[2].x = 200; missions[2].y = 200;
+        missions[2].text = 'Вези тачку на базу (север)';
+        document.getElementById('mt').innerText = missions[2].text;
+        player.wanted = Math.min(5, player.wanted + 2);
+      }
+    }
+  }
+}
+
+function shoot() {
+  if (player.ammo <= 0) return;
+  player.ammo--;
+  const worldMouseX = mouse.x + cam.x;
+  const worldMouseY = mouse.y + cam.y;
+  const angle = Math.atan2(worldMouseY - player.y, worldMouseX - player.x);
+  bullets.push({
+    x: player.x + Math.cos(angle) * 15,
+    y: player.y + Math.sin(angle) * 15,
+    angle, speed: 14, life: 70
+  });
+  addParticle(player.x + Math.cos(angle) * 18, player.y + Math.sin(angle) * 18, '#ff0', 3);
+  shells.push({
+    x: player.x, y: player.y,
+    vx: Math.cos(angle + Math.PI/2) * 2,
+    vy: Math.sin(angle + Math.PI/2) * 2,
+    life: 60, angle: Math.random() * Math.PI * 2
+  });
+}
+
+function reload() {
+  player.ammo = 30;
+  showMsg('🔫 ПЕРЕЗАРЯДКА');
+}
+
+function showMsg(text) {
+  const msg = document.getElementById('msg');
+  msg.innerText = text;
+  msg.classList.add('show');
+  clearTimeout(showMsg._t);
+  showMsg._t = setTimeout(() => msg.classList.remove('show'), 2200);
+}
+
+function addParticle(x, y, color, count = 5) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 5,
+      vy: (Math.random() - 0.5) * 5,
+      life: 25,
+      color,
+      size: 2 + Math.random() * 3
+    });
+  }
+}
+
+function createExplosion(x, y) {
+  explosions.push({ x, y, radius: 10, maxRadius: 60, life: 40 });
+  for (let i = 0; i < 30; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 6;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 30 + Math.random() * 20,
+      color: Math.random() > 0.5 ? '#ff6600' : '#ffcc00',
+      size: 3 + Math.random() * 4
+    });
+  }
+  for (let i = 0; i < 15; i++) {
+    particles.push({
+      x: x + (Math.random() - 0.5) * 20,
+      y: y + (Math.random() - 0.5) * 20,
+      vx: (Math.random() - 0.5) * 2,
+      vy: (Math.random() - 0.5) * 2,
+      life: 60 + Math.random() * 40,
+      color: '#333',
+      size: 5 + Math.random() * 5
+    });
+  }
+  peds.forEach(ped => {
+    if (ped.alive && Math.hypot(ped.x - x, ped.y - y) < 80) killPed(ped, false);
+  });
+  cops.forEach(cop => {
+    if (Math.hypot(cop.x - x, cop.y - y) < 80) {
+      cop.hp -= 50;
+      if (cop.hp <= 0) {
+        corpses.push({ x: cop.x, y: cop.y, angle: cop.angle, color: '#003366', skinColor: '#ffdbac' });
+        cops.splice(cops.indexOf(cop), 1);
+        player.wanted = Math.min(5, player.wanted + 1);
+        player.money += 200;
+      }
+    }
+  });
+  if (Math.hypot(player.x - x, player.y - y) < 80) player.hp -= 30;
+}
+
+function killPed(ped, byCar = false) {
+  if (!ped.alive) return;
+  ped.alive = false;
+  corpses.push({ x: ped.x, y: ped.y, angle: ped.angle, color: ped.shirtColor, skinColor: ped.skinColor });
+  addParticle(ped.x, ped.y, '#a00', 8);
+  player.wanted = Math.min(5, player.wanted + 1);
+  player.money += byCar ? 20 : 50;
+  peds.forEach(p => {
+    if (p.alive && Math.hypot(p.x - ped.x, p.y - ped.y) < 150) p.panicTimer = 180;
+  });
+}
+
+function damageCar(car, damage) {
+  car.hp -= damage;
+  car.damaged = true;
+  addParticle(car.x, car.y, '#ff0', 3);
+  if (car.hp <= 0 && !car.burning) {
+    car.burning = true;
+    car.burnTimer = 120;
+    if (player.inCar && player.car === car) {
+      player.inCar = false;
+      player.x = car.x + 30;
+      player.y = car.y;
+      player.car = null;
+      player.hp -= 20;
+    }
+  }
+}
+
+// ============ ДОБАВЛЕНИЕ СЛЕДА ШИНЫ ============
+function addSkidmark(x, y, angle) {
+  // Два следа (задние колёса)
+  const offsetX = -Math.cos(angle) * 15;
+  const offsetY = -Math.sin(angle) * 15;
+  const sideX = Math.cos(angle + Math.PI/2) * 8;
+  const sideY = Math.sin(angle + Math.PI/2) * 8;
+  
+  skidmarks.push({
+    x: x + offsetX + sideX,
+    y: y + offsetY + sideY,
+    angle: angle,
+    alpha: 0.6,
+    life: 600 // долго остаются
+  });
+  skidmarks.push({
+    x: x + offsetX - sideX,
+    y: y + offsetY - sideY,
+    angle: angle,
+    alpha: 0.6,
+    life: 600
+  });
+  
+  // Ограничение количества следов
+  if (skidmarks.length > 800) {
+    skidmarks.splice(0, 2);
+  }
+}
+
+function update() {
+  if (!gameStarted) return;
+
+  mouse.worldX = mouse.x + cam.x;
+  mouse.worldY = mouse.y + cam.y;
+
+  if (player.inCar && player.car) {
+    const car = player.car;
+    
+    if (car.burning) {
+      car.burnTimer--;
+      if (car.burnTimer <= 0) {
+        createExplosion(car.x, car.y);
+        cars.splice(cars.indexOf(car), 1);
+        player.inCar = false;
+        player.car = null;
+      }
+    }
+    
+    // ===== ДРИФТ МЕХАНИКА =====
+    const handbrake = keys['Space'];
+    const accel = 0.15;
+    const maxSpeed = car.damaged ? 4 : 6;
+    const brake = 0.2;
+    
+    // Ускорение/торможение
+    if (keys['KeyW']) car.speed = Math.min(car.speed + accel, maxSpeed);
+    else if (keys['KeyS']) car.speed = Math.max(car.speed - brake, -2.5);
+    else car.speed *= 0.98;
+    
+    // Поворот
+    let turnRate = 0.03 * Math.abs(car.speed) / maxSpeed;
+    if (handbrake && Math.abs(car.speed) > 1) {
+      // При ручнике — поворотливость выше
+      turnRate *= 2.2;
+    }
+    
+    if (Math.abs(car.speed) > 0.1) {
+      if (keys['KeyA']) car.angle -= turnRate;
+      if (keys['KeyD']) car.angle += turnRate;
+    }
+    
+    // ===== ФИЗИКА ДРИФТА =====
+    // Разница между направлением машины и направлением движения
+    let angleDiff = car.angle - car.velocityAngle;
+    // Нормализация угла
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    
+    // Определяем, дрифтуем ли мы
+    const driftAmount = Math.abs(angleDiff);
+    const wasDrifting = isDrifting;
+    isDrifting = handbrake && Math.abs(car.speed) > 2 && (keys['KeyA'] || keys['KeyD']);
+    
+    if (isDrifting) {
+      // При дрифте — низкое сцепление, машина скользит боком
+      const grip = 0.85; // низкое сцепление
+      car.velocityAngle += (car.angle - car.velocityAngle) * (1 - grip);
+      
+      // Боковое скольжение
+      car.lateralSpeed = Math.sin(angleDiff) * car.speed * 0.8;
+      
+      // Следы шин
+      if (Math.abs(car.speed) > 2) {
+        addSkidmark(car.x, car.y, car.velocityAngle);
+        
+        // Дым из-под колёс
+        if (Math.random() < 0.6) {
+          const backX = car.x - Math.cos(car.angle) * 18;
+          const backY = car.y - Math.sin(car.angle) * 18;
+          particles.push({
+            x: backX + (Math.random() - 0.5) * 10,
+            y: backY + (Math.random() - 0.5) * 10,
+            vx: (Math.random() - 0.5) * 1.5,
+            vy: (Math.random() - 0.5) * 1.5,
+            life: 25 + Math.random() * 15,
+            color: 'rgba(200,200,200,0.6)',
+            size: 4 + Math.random() * 4,
+            isSmoke: true
+          });
+        }
+        
+        // Очки за дрифт
+        driftTime++;
+        driftScore += Math.floor(Math.abs(car.speed) * driftAmount * 10);
+        
+        // Комбо множитель
+        if (driftTime > 60) driftCombo = 2;
+        if (driftTime > 120) driftCombo = 3;
+        if (driftTime > 200) driftCombo = 5;
+        if (driftTime > 300) driftCombo = 8;
+        
+        driftScore = Math.floor(driftScore * (1 + driftCombo * 0.01));
+        
+        document.getElementById('driftUI').classList.add('active');
+        document.getElementById('driftScore').innerText = Math.floor(driftScore);
+        document.getElementById('driftCombo').innerText = 'x' + driftCombo;
+      }
+    } else {
+      // Обычное движение — высокое сцепление
+      const grip = handbrake ? 0.92 : 0.96;
+      car.velocityAngle += (car.angle - car.velocityAngle) * (1 - grip);
+      car.lateralSpeed *= 0.85;
+    }
+    
+    // Движение машины
+    const moveAngle = car.velocityAngle;
+    const forwardSpeed = car.speed * Math.cos(angleDiff);
+    const sideSpeed = car.lateralSpeed;
+    
+    const nx = car.x + Math.cos(moveAngle) * forwardSpeed + Math.cos(moveAngle + Math.PI/2) * sideSpeed;
+    const ny = car.y + Math.sin(moveAngle) * forwardSpeed + Math.sin(moveAngle + Math.PI/2) * sideSpeed;
+    
+    const carR = Math.max(car.w, car.h) / 2 - 4;
+    if (canMove(nx, ny, carR)) {
+      car.x = nx;
+      car.y = ny;
+    } else {
+      addParticle(car.x + Math.cos(car.angle) * 20, car.y + Math.sin(car.angle) * 20, '#ff0', 4);
+      car.speed *= -0.3;
+      car.lateralSpeed *= 0.5;
+      damageCar(car, 5);
+      // При ударе — сброс дрифта
+      if (isDrifting) {
+        isDrifting = false;
+        driftScore = 0;
+        driftCombo = 1;
+        document.getElementById('driftUI').classList.remove('active');
+      }
+    }
+    
+    player.x = car.x;
+    player.y = car.y;
+    player.angle = car.angle;
+    
+    // Обновляем спидометр
+    document.getElementById('speed').innerText = Math.floor(Math.abs(car.speed) * 20);
+
+    // Наезд на пешеходов
+    if (Math.abs(car.speed) > 1.5) {
+      peds.forEach(ped => {
+        if (!ped.alive) return;
+        const dist = Math.hypot(car.x - ped.x, car.y - ped.y);
+        if (dist < 22) {
+          killPed(ped, true);
+          car.speed *= 0.85;
+        }
+      });
+    }
+
+    // Столкновение с другими машинами
+    cars.forEach(other => {
+      if (other === car) return;
+      const dist = Math.hypot(car.x - other.x, car.y - other.y);
+      if (dist < 35) {
+        const pushAngle = Math.atan2(car.y - other.y, car.x - other.x);
+        car.x += Math.cos(pushAngle) * 2;
+        car.y += Math.sin(pushAngle) * 2;
+        car.speed *= 0.5;
+        car.lateralSpeed *= 0.5;
+        damageCar(car, 10);
+        damageCar(other, 10);
+        addParticle((car.x + other.x)/2, (car.y + other.y)/2, '#ff0', 3);
+      }
+    });
+
+  } else {
+    const speed = keys['ShiftLeft'] ? 2.5 : 1.5;
+    let dx = 0, dy = 0;
+    if (keys['KeyW']) dy -= 1;
+    if (keys['KeyS']) dy += 1;
+    if (keys['KeyA']) dx -= 1;
+    if (keys['KeyD']) dx += 1;
+
+    if (dx || dy) {
+      const len = Math.hypot(dx, dy);
+      dx = (dx / len) * speed;
+      dy = (dy / len) * speed;
+      const nx = player.x + dx;
+      const ny = player.y + dy;
+      if (canMove(nx, player.y, player.radius)) player.x = nx;
+      if (canMove(player.x, ny, player.radius)) player.y = ny;
+    }
+    player.angle = Math.atan2(mouse.worldY - player.y, mouse.worldX - player.x);
+    document.getElementById('speed').innerText = '0';
+  }
+
+  cam.x = player.x - canvas.width / 2;
+  cam.y = player.y - canvas.height / 2;
+
+  // Пешеходы
+  peds.forEach(ped => {
+    if (!ped.alive) return;
+    if (ped.panicTimer > 0) {
+      ped.panicTimer--;
+      ped.speed = 1.8;
+      const dxP = ped.x - player.x;
+      const dyP = ped.y - player.y;
+      if (Math.hypot(dxP, dyP) < 200) ped.angle = Math.atan2(dyP, dxP);
+    } else {
+      ped.speed = 0.5 + Math.random() * 0.1;
+      if (Math.random() < 0.015) ped.angle += (Math.random() - 0.5) * 1.5;
+    }
+    const nx = ped.x + Math.cos(ped.angle) * ped.speed;
+    const ny = ped.y + Math.sin(ped.angle) * ped.speed;
+    if (canMove(nx, ny, ped.radius)) {
+      ped.x = nx; ped.y = ny;
+    } else {
+      ped.angle += (Math.random() > 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random());
+    }
+  });
+
+  // Пули игрока
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += Math.cos(b.angle) * b.speed;
+    b.y += Math.sin(b.angle) * b.speed;
+    b.life--;
+    if (b.life <= 0 || pointInBuilding(b.x, b.y, 0)) {
+      if (pointInBuilding(b.x, b.y, 0)) addParticle(b.x, b.y, '#ff0', 3);
+      bullets.splice(i, 1);
+      continue;
+    }
+    let hitCar = false;
+    for (const car of cars) {
+      if (car.burning) continue;
+      const dx = b.x - car.x, dy = b.y - car.y;
+      const cos = Math.cos(-car.angle), sin = Math.sin(-car.angle);
+      const localX = dx * cos - dy * sin;
+      const localY = dx * sin + dy * cos;
+      if (Math.abs(localX) < car.w/2 && Math.abs(localY) < car.h/2) {
+        damageCar(car, 15);
+        addParticle(b.x, b.y, '#ff0', 2);
+        bullets.splice(i, 1);
+        hitCar = true;
+        break;
+      }
+    }
+    if (hitCar) continue;
+    let hit = false;
+    for (let j = peds.length - 1; j >= 0; j--) {
+      const p = peds[j];
+      if (!p.alive) continue;
+      if (Math.hypot(b.x - p.x, b.y - p.y) < p.radius + 2) {
+        killPed(p, false);
+        bullets.splice(i, 1);
+        hit = true;
+        break;
+      }
+    }
+    if (hit) continue;
+    for (let j = cops.length - 1; j >= 0; j--) {
+      const c = cops[j];
+      if (Math.hypot(b.x - c.x, b.y - c.y) < 12) {
+        c.hp -= 30;
+        addParticle(c.x, c.y, '#00f', 4);
+        bullets.splice(i, 1);
+        if (c.hp <= 0) {
+          corpses.push({ x: c.x, y: c.y, angle: c.angle, color: '#003366', skinColor: '#ffdbac' });
+          cops.splice(j, 1);
+          player.wanted = Math.min(5, player.wanted + 1);
+          player.money += 200;
+        }
+        break;
+      }
+    }
+  }
+
+  // Полиция
+  if (player.wanted > 0 && cops.length < player.wanted * 2 && Math.random() < 0.015) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 450 + Math.random() * 200;
+    const sx = player.x + Math.cos(angle) * dist;
+    const sy = player.y + Math.sin(angle) * dist;
+    if (canMove(sx, sy, 10)) {
+      cops.push({ x: sx, y: sy, angle: 0, speed: 2.3 + player.wanted * 0.3, hp: 100, shootCd: 0 });
+    }
+  }
+
+  cops.forEach(cop => {
+    const dx = player.x - cop.x, dy = player.y - cop.y;
+    const dist = Math.hypot(dx, dy);
+    cop.angle = Math.atan2(dy, dx);
+    if (dist > 45) {
+      const nx = cop.x + Math.cos(cop.angle) * cop.speed;
+      const ny = cop.y + Math.sin(cop.angle) * cop.speed;
+      if (canMove(nx, ny, 10)) { cop.x = nx; cop.y = ny; }
+      else {
+        const alt1 = cop.angle + Math.PI / 3;
+        const alt2 = cop.angle - Math.PI / 3;
+        const nx1 = cop.x + Math.cos(alt1) * cop.speed;
+        const ny1 = cop.y + Math.sin(alt1) * cop.speed;
+        const nx2 = cop.x + Math.cos(alt2) * cop.speed;
+        const ny2 = cop.y + Math.sin(alt2) * cop.speed;
+        if (canMove(nx1, ny1, 10)) { cop.x = nx1; cop.y = ny1; }
+        else if (canMove(nx2, ny2, 10)) { cop.x = nx2; cop.y = ny2; }
+      }
+    }
+    cop.shootCd--;
+    if (dist < 280 && dist > 50 && cop.shootCd <= 0) {
+      copBullets.push({
+        x: cop.x, y: cop.y,
+        angle: cop.angle + (Math.random() - 0.5) * 0.15,
+        speed: 8, life: 55
+      });
+      cop.shootCd = 35;
+    }
+    if (dist < 25 && Math.random() < 0.02) {
+      player.hp -= 4;
+      addParticle(player.x, player.y, '#f00', 3);
+    }
+  });
+
+  for (let i = copBullets.length - 1; i >= 0; i--) {
+    const b = copBullets[i];
+    b.x += Math.cos(b.angle) * b.speed;
+    b.y += Math.sin(b.angle) * b.speed;
+    b.life--;
+    if (b.life <= 0 || pointInBuilding(b.x, b.y, 0)) {
+      copBullets.splice(i, 1);
+      continue;
+    }
+    for (const car of cars) {
+      if (car.burning) continue;
+      const dx = b.x - car.x, dy = b.y - car.y;
+      const cos = Math.cos(-car.angle), sin = Math.sin(-car.angle);
+      const localX = dx * cos - dy * sin;
+      const localY = dx * sin + dy * cos;
+      if (Math.abs(localX) < car.w/2 && Math.abs(localY) < car.h/2) {
+        damageCar(car, 10);
+        copBullets.splice(i, 1);
+        break;
+      }
+    }
+    if (Math.hypot(b.x - player.x, b.y - player.y) < player.radius + 2) {
+      player.hp -= 7;
+      addParticle(player.x, player.y, '#f00', 4);
+      copBullets.splice(i, 1);
+    }
+  }
+
+  cars.forEach(car => {
+    if (car.burning) {
+      car.burnTimer--;
+      if (Math.random() < 0.3) {
+        particles.push({
+          x: car.x + (Math.random() - 0.5) * 20,
+          y: car.y + (Math.random() - 0.5) * 10,
+          vx: (Math.random() - 0.5),
+          vy: -1 - Math.random() * 2,
+          life: 30,
+          color: Math.random() > 0.5 ? '#ff6600' : '#333',
+          size: 3 + Math.random() * 3,
+          isSmoke: true
+        });
+      }
+      if (car.burnTimer <= 0) {
+        createExplosion(car.x, car.y);
+        cars.splice(cars.indexOf(car), 1);
+      }
+    }
+  });
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    if (p.isSmoke) {
+      p.vx *= 0.95;
+      p.vy *= 0.95;
+      p.size *= 1.02; // дым расширяется
+    } else {
+      p.vx *= 0.92;
+      p.vy *= 0.92;
+    }
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  for (let i = shells.length - 1; i >= 0; i--) {
+    const s = shells[i];
+    s.x += s.vx; s.y += s.vy;
+    s.vx *= 0.9; s.vy *= 0.9;
+    s.angle += 0.2;
+    s.life--;
+    if (s.life <= 0) shells.splice(i, 1);
+  }
+
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    const e = explosions[i];
+    e.radius += 2;
+    e.life--;
+    if (e.life <= 0) explosions.splice(i, 1);
+  }
+
+  // Следы шин — затухание
+  for (let i = skidmarks.length - 1; i >= 0; i--) {
+    skidmarks[i].life--;
+    if (skidmarks[i].life < 100) {
+      skidmarks[i].alpha *= 0.99;
+    }
+    if (skidmarks[i].life <= 0) skidmarks.splice(i, 1);
+  }
+
+  if (curMission < missions.length) {
+    const m = missions[curMission];
+    if (Math.hypot(player.x - m.x, player.y - m.y) < 40) {
+      if (curMission === 0) {
+        showMsg('📞 БОСС: "Есть работёнка..."');
+        curMission = 1;
+      } else if (curMission === 2) {
+        showMsg('🚗 +$1000! Забери посылку');
+        player.money += 1000;
+        curMission = 3;
+        player.wanted = 0;
+      } else if (curMission === 3) {
+        if (!hasPackage) {
+          hasPackage = true;
+          showMsg('📦 Посылка взята! Вези клиенту');
+          missions[3] = { x: 1600, y: 1600, text: 'Доставь посылку клиенту' };
+        } else {
+          showMsg('✅ +$1500! Устрани цель');
+          player.money += 1500;
+          curMission = 4;
+        }
+      } else if (curMission === 4) {
+        showMsg('💀 +$3000! ВСЕ МИССИИ ПРОЙДЕНЫ!');
+        player.money += 3000;
+        curMission = 99;
+      }
+      if (curMission < missions.length) {
+        document.getElementById('mt').innerText = missions[curMission].text;
+      } else {
+        document.getElementById('mt').innerText = '🎉 Свободная игра!';
+      }
+    }
+  }
+
+  document.getElementById('hp').innerText = Math.max(0, Math.floor(player.hp));
+  document.getElementById('money').innerText = player.money;
+  document.getElementById('ammo').innerText = player.ammo;
+  document.getElementById('wanted').innerText = '★'.repeat(player.wanted) || '-';
+
+  if (player.hp <= 0) {
+    showMsg('💀 WASTED\nF5 — заново');
+    gameStarted = false;
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#3a4a35';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  ctx.fillStyle = '#777';
+  sidewalks.forEach(s => ctx.fillRect(s.x, s.y, s.w, s.h));
+
+  ctx.fillStyle = '#2a2a2a';
+  roads.forEach(r => ctx.fillRect(r.x, r.y, r.w, r.h));
+
+  ctx.strokeStyle = '#ffcc00';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([18, 18]);
+  roads.forEach(r => {
+    ctx.beginPath();
+    if (r.vertical) {
+      ctx.moveTo(r.x + r.w/2, r.y);
+      ctx.lineTo(r.x + r.w/2, r.y + r.h);
+    } else {
+      ctx.moveTo(r.x, r.y + r.h/2);
+      ctx.lineTo(r.x + r.w, r.y + r.h/2);
+    }
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  // ===== СЛЕДЫ ШИН (РИСУЕМ ПЕРЕ ЗДАНИЯМИ, НО ПОСЛЕ ДОРОГ) =====
+  skidmarks.forEach(s => {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.angle);
+    ctx.fillStyle = `rgba(20, 20, 20, ${s.alpha})`;
+    ctx.fillRect(-3, -1.5, 6, 3);
+    ctx.restore();
+  });
+
+  trees.forEach(t => {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.arc(t.x + 2, t.y + 2, t.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2d5016';
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#4a2511';
+    ctx.fillRect(t.x - 2, t.y - 2, 4, 4);
+  });
+
+  lamps.forEach(l => {
+    ctx.fillStyle = '#333';
+    ctx.fillRect(l.x - 1, l.y - 8, 2, 16);
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath();
+    ctx.arc(l.x, l.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  buildings.forEach(b => {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(b.x + 6, b.y + 6, b.w, b.h);
+    ctx.fillStyle = b.color;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = b.roofColor;
+    ctx.fillRect(b.x + 4, b.y + 4, b.w - 8, b.h - 8);
+    ctx.fillStyle = b.windowColor;
+    const winSize = 7, gap = 14;
+    for (let wx = b.x + 10; wx < b.x + b.w - 10; wx += gap) {
+      for (let wy = b.y + 10; wy < b.y + b.h - 10; wy += gap) {
+        ctx.fillRect(wx, wy, winSize, winSize);
+      }
+    }
+    if (b.hasAC) {
+      ctx.fillStyle = '#555';
+      ctx.fillRect(b.x + b.w - 20, b.y + 15, 12, 8);
+    }
+    if (b.hasSign) {
+      ctx.fillStyle = b.signColor;
+      ctx.fillRect(b.x + 10, b.y + b.h - 25, 40, 15);
+    }
+    if (b.hasAntenna) {
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.w * 0.7, b.y + b.h * 0.3);
+      ctx.lineTo(b.x + b.w * 0.7, b.y + b.h * 0.3 - 15);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+  });
+
+  corpses.forEach(c => {
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.angle);
+    ctx.fillStyle = c.color;
+    ctx.fillRect(-8, -4, 16, 8);
+    ctx.fillStyle = c.skinColor;
+    ctx.beginPath();
+    ctx.arc(-6, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(120,0,0,0.6)';
+    ctx.beginPath();
+    ctx.ellipse(2, 2, 12, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
+  if (curMission < missions.length) {
+    const m = missions[curMission];
+    const pulse = Math.sin(Date.now() / 200) * 0.3 + 0.7;
+    ctx.fillStyle = curMission === 4 ? `rgba(255,0,0,${pulse})` : `rgba(255,255,0,${pulse})`;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 22px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('M', m.x, m.y + 7);
+  }
+
+  // Машины
+  cars.forEach(car => {
+    ctx.save();
+    ctx.translate(car.x, car.y);
+    ctx.rotate(car.angle);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(-car.w/2 + 3, -car.h/2 + 3, car.w, car.h);
+
+    ctx.fillStyle = car.isTarget ? '#e00' : car.color;
+    ctx.fillRect(-car.w/2, -car.h/2, car.w, car.h);
+    
+    if (car.damaged) {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(-car.w/2, -car.h/2, car.w, car.h);
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.beginPath();
+      ctx.arc(-car.w/4, -car.h/4, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(car.w/6, car.h/5, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(car.w/4 - 2, -car.h/2 + 2, car.w/4, car.h - 4);
+
+    ctx.fillStyle = car.damaged ? 'rgba(150,150,150,0.6)' : 'rgba(80,120,160,0.8)';
+    ctx.fillRect(-car.w/6, -car.h/3, car.w/3, car.h*2/3);
+    
+    if (car.damaged) {
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-car.w/6, -car.h/3);
+      ctx.lineTo(car.w/6, car.h/3);
+      ctx.moveTo(car.w/6, -car.h/3);
+      ctx.lineTo(-car.w/6, car.h/3);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#ffffaa';
+    ctx.fillRect(car.w/2 - 3, -car.h/3, 3, 4);
+    ctx.fillRect(car.w/2 - 3, car.h/3 - 4, 3, 4);
+    ctx.fillStyle = '#c00';
+    ctx.fillRect(-car.w/2, -car.h/3, 2, 4);
+    ctx.fillRect(-car.w/2, car.h/3 - 4, 2, 4);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-car.w/3, -car.h/2 - 2, 9, 3);
+    ctx.fillRect(-car.w/3, car.h/2 - 1, 9, 3);
+    ctx.fillRect(car.w/6, -car.h/2 - 2, 9, 3);
+    ctx.fillRect(car.w/6, car.h/2 - 1, 9, 3);
+
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-car.w/2, -car.h/2, car.w, car.h);
+
+    ctx.restore();
+  });
+
+  peds.forEach(ped => {
+    if (!ped.alive) return;
+    ctx.save();
+    ctx.translate(ped.x, ped.y);
+    ctx.rotate(ped.angle);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(2, 2, 9, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-3, -5, 3, 4);
+    ctx.fillRect(-3, 1, 3, 4);
+    ctx.fillStyle = ped.shirtColor;
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = ped.skinColor;
+    ctx.beginPath();
+    ctx.arc(2, 0, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  cops.forEach(cop => {
+    ctx.save();
+    ctx.translate(cop.x, cop.y);
+    ctx.rotate(cop.angle);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(2, 2, 11, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#003366';
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffdbac';
+    ctx.beginPath();
+    ctx.arc(3, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#001133';
+    ctx.fillRect(1, -4, 5, 8);
+    ctx.fillStyle = '#222';
+    ctx.fillRect(8, -2, 9, 4);
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillRect(-3, -3, 3, 2);
+    ctx.fillRect(-3, 1, 3, 2);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  ctx.fillStyle = '#cc9900';
+  shells.forEach(s => {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.angle);
+    ctx.fillRect(-2, -1, 4, 2);
+    ctx.restore();
+  });
+
+  particles.forEach(p => {
+    if (p.isSmoke) {
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = (p.life / 40) * 0.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = p.life / 25;
+      ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    }
+  });
+  ctx.globalAlpha = 1;
+
+  explosions.forEach(e => {
+    const alpha = e.life / 40;
+    ctx.fillStyle = `rgba(255,100,0,${alpha})`;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,200,0,${alpha * 0.7})`;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.radius * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle = '#ffcc00';
+  bullets.forEach(b => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.fillStyle = '#ff3333';
+  copBullets.forEach(b => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  if (!player.inCar) {
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(2, 2, 12, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-4, -6, 4, 5);
+    ctx.fillRect(-4, 1, 4, 5);
+    ctx.fillStyle = '#006600';
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffdbac';
+    ctx.beginPath();
+    ctx.arc(3, 0, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.fillRect(8, -2, 11, 4);
+    ctx.fillRect(14, -4, 4, 8);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore();
+
+  // Мини-карта
+  const mmSize = 140;
+  const mmX = canvas.width - mmSize - 15;
+  const mmY = canvas.height - mmSize - 15;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(mmX, mmY, mmSize, mmSize);
+  ctx.strokeStyle = '#ff0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(mmX, mmY, mmSize, mmSize);
+  const scale = mmSize / WORLD;
+  ctx.fillStyle = '#444';
+  roads.forEach(r => {
+    ctx.fillRect(mmX + r.x * scale, mmY + r.y * scale, r.w * scale, r.h * scale);
+  });
+  ctx.fillStyle = '#666';
+  buildings.forEach(b => {
+    ctx.fillRect(mmX + b.x * scale, mmY + b.y * scale, b.w * scale, b.h * scale);
+  });
+  if (curMission < missions.length) {
+    const m = missions[curMission];
+    ctx.fillStyle = curMission === 4 ? '#f00' : '#ff0';
+    ctx.beginPath();
+    ctx.arc(mmX + m.x * scale, mmY + m.y * scale, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#0f0';
+  ctx.beginPath();
+  ctx.arc(mmX + player.x * scale, mmY + player.y * scale, 3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+genCity();
+document.getElementById('mt').innerText = missions[0].text;
+loop();
+</script>
+</body>
+</html>
